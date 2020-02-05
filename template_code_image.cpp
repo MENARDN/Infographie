@@ -13,6 +13,12 @@
 #include <iostream>     // std::cout
 #include <algorithm>    // std::max
 
+#include <omp.h>
+
+#include <random>
+std::default_random_engine engine[8];
+std::uniform_real_distribution<double> distrib(0, 1);
+
 class Vector {
 public:
 	Vector(double x = 0, double y = 0, double z = 0) {
@@ -62,8 +68,15 @@ Vector operator*(const Vector& A, const double& b) {
 	return Vector(A[0]*b, A[1]*b, A[2]*b);
 }
 
+Vector operator*(const Vector& A, const Vector& B) {
+	return Vector(A[0] * B[0], A[1] * B[1], A[2] * B[2]);
+}
+
 Vector operator/(const Vector& A, const double& b) {
 	return Vector(A[0] / b, A[1] / b, A[2] / b);
+}
+Vector cross(const Vector& A, const Vector& B) {
+	return Vector(A[1] * B[2] - A[2] * B[1], A[2] * B[0] - A[0] * B[2], A[0] * B[1] - A[1] * B[0]);
 }
 
 class Ray {
@@ -106,6 +119,32 @@ public:
 	double R;
 	bool diffuse, transp;
 };
+
+Vector random_cos(const Vector& N) {
+	//orthogonal frame:
+	Vector T1;
+	if (std::abs(N[0]) <= std::abs(N[1]) && std::abs(N[0]) <= std::abs(N[2])) {
+		T1 = Vector(0, -N[2], N[1]);
+	}
+	else if (std::abs(N[1]) <= std::abs(N[0]) && std::abs(N[1]) <= std::abs(N[2])) {
+		T1 = Vector(-N[2],0,N[0]);
+	}
+	else {
+		T1 = Vector(-N[1],N[0],0);
+	}
+	T1.normalize();
+	Vector T2 = cross(N, T1);
+
+	double r1 = distrib(engine[omp_get_thread_num()]);
+	double r2 = distrib(engine[omp_get_thread_num()]);
+	Vector V;
+	V[0] = cos(2 * M_PI * r1) * sqrt(1 - r2);
+	V[1] = sin(2 * M_PI * r1) * sqrt(1 - r2);
+	V[2] = sqrt(r2);
+
+	return V[0] * T1 + V[1] * T2 + V[2] * N;
+}
+
 
 class Scene {
 public:
@@ -164,7 +203,7 @@ public:
 				double lightdist2 = (L - P).Norm2();
 				Vector u2 = L - P;
 				u2.normalize();
-				Ray r2(P, u2);
+				Ray r2(P + 0.0001*N, u2);
 				Vector P2, N2, albedo2;
 				bool has_obs = intersect(r2, P2, N2, albedo2, dif, transp);
 				bool lighted = true;
@@ -174,36 +213,45 @@ public:
 						lighted = false;
 					}
 				}
-
+				Vector I;
 				if (lighted) {
 					double lightdist = sqrt(lightdist2);
-					Vector I = (l * albedo / M_PI * dot(N, (L - P) / lightdist)) / (lightdist * lightdist);
-					return I;
+					I = (l * albedo / M_PI * dot(N, (L - P) / lightdist)) / (lightdist * lightdist);
+					
 				}
 				else {
-					return(Vector(0., 0., 0.));
+					I = Vector(0., 0., 0.);
 				}
+				Vector wi = random_cos(N);
+				wi.normalize();
+				has_obs = intersect(Ray(P + 0.0001*N,wi), P2, N2, albedo2, dif, transp);
+				lightdist2 = (L - P2).Norm2();
+				double lightdist = sqrt(lightdist2);
+
+				I = I + albedo * (l * albedo2 / M_PI * dot(N2, (L - P2) / lightdist)) / (lightdist * lightdist);
+				return I;
+
 			}
 			else if (transp && num_bounce != 0){
-				double orient = dot(r.u, N);
-				double n1, n2, coeff;
-				if (orient < 0) {
-					n1 = 1., n2 = 1.3, coeff = 1.;
+				double n1 = 1;
+				double n2 = 1.3;
+				Vector N_trans(N);
+				if (dot(r.u,N)>0) {
+					n1 = 1.3;
+					n2 = 1;
+					N_trans = -1*N;
 				}
-				else {
-					n2 = 1., n1 = 1.3, coeff = -1.;
-				}
-				double inside_sqrt = 1. - (n1 / n2) * (n1 / n2) * (1. - orient * orient);
+				double inside_sqrt = 1 - pow(n1 / n2,2) * (1 - pow(dot(N_trans,r.u),2));
 				if (inside_sqrt > 0) {
-					Vector newu = (n1 / n2) * r.u - ((n1 / n2) * orient + sqrt(inside_sqrt)) * coeff * N;
+					Vector newu = (n1 / n2) * (r.u - dot(r.u,N_trans)*N_trans) - N_trans * sqrt(inside_sqrt);
 					newu.normalize();
-					Ray newr(P - 0.0001 * coeff * N, newu);
+					Ray newr(P - 0.0001 * N_trans, newu);
 					return getColor(newr, num_bounce - 1, L, l);
 				}
 				else {
-					Vector newu = r.u - 2 * orient * coeff * N;
+					Vector newu = r.u - 2 * dot(N_trans, r.u) * N_trans;
 					newu.normalize();
-					Ray newr(P + 0.0001 * coeff * N, newu);
+					Ray newr(P + 0.0001 * N_trans, newu);
 					return getColor(newr, num_bounce - 1, L, l);
 				}
 
@@ -228,6 +276,8 @@ public:
 int main() {
 	int W = 512;
 	int H = 512;
+	int N_rays = 100;
+
 	double fov = 60 * M_PI / 180;
 	Vector C(0, 0, 55);
 	Vector L(-10, 20, 40);
@@ -238,17 +288,28 @@ int main() {
 	mainscene.add_sphere(Sphere(Vector(0., 1000, 0), 940, Vector(0., 0., 1.), true, false));
 	mainscene.add_sphere(Sphere(Vector(0., -1000, 0), 990, Vector(0., 1., 0.), true, false));
 	mainscene.add_sphere(Sphere(Vector(0., 0., 1000), 940, Vector(1., 1., 1.), true, false));
-	mainscene.add_sphere(Sphere(Vector(1000, 0., 0), 940, Vector(1., 1., 1.), true, false));
-	mainscene.add_sphere(Sphere(Vector(-1000, 0., 0), 940, Vector(1., 1., 1.), true, false));
+	mainscene.add_sphere(Sphere(Vector(990, 0., 0), 940, Vector(1., 1., 1.), true, false));
+	mainscene.add_sphere(Sphere(Vector(-990, 0., 0), 940, Vector(1., 1., 1.), true, false));
 
 	std::vector<unsigned char> image(W*H * 3, 0);
+	#pragma omp parallel for
 	for (int i = 0; i < H; i++) {
 		for (int j = 0; j < W; j++) {
 			double d = W / (2 * tan(fov / 2));
-			Vector u(j - W / 2, -i + H / 2, -d);
-			u.normalize();
-			Ray rini(C, u);
-			Vector I = mainscene.getColor(rini, 15, L, l);
+			
+			Vector I(0, 0, 0);
+			for (int k = 0; k < N_rays; k++) {
+				double r1 = distrib(engine[omp_get_thread_num()]);
+				double r2 = distrib(engine[omp_get_thread_num()]);
+				double R = sqrt(-2 * log(r1));
+				double x1 = R * cos(2 * 3.1416 * r2) * 0.5;
+				double x2 = R * sin(2 * 3.1416 * r2) * 0.5;
+				Vector u((j + x1 - 0.5 - W / 2 ),( -i + x2 - 0.5 + H / 2 ), -d);
+				u.normalize();
+				Ray rini(C, u);
+				I = I + mainscene.getColor(rini, 15, L, l);
+			}
+			I = I / N_rays;
 			image[(i * W + j) * 3 + 0] = std::min(255, std::max(0, int(pow(I[0], 0.45))));
 			image[(i * W + j) * 3 + 1] = std::min(255, std::max(0, int(pow(I[1], 0.45))));
 			image[(i * W + j) * 3 + 2] = std::min(255, std::max(0, int(pow(I[2], 0.45))));

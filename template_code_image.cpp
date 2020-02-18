@@ -230,7 +230,7 @@ public:
 				Vector I;
 				if (lighted) {
 					double p = costhetasecond / (M_PI * 4 * M_PI * Spheres[0].R * Spheres[0].R);
-					I = ((Spheres[0].Emi * albedo / M_PI * costheta * costhetaprime) / (d2 * p))+;
+					I = ((Spheres[0].Emi * albedo / M_PI * costheta * costhetaprime) / (d2 * p));
 				}
 				else {
 					I = Vector(0., 0., 0.);
@@ -300,7 +300,7 @@ int main() {
 	Scene mainscene;
 
 	//Lightsource
-	mainscene.add_sphere(Sphere(L, 2, Vector(1., 1., 1.), false, false,(l/(M_PI*2*2))*Vector(1,0.5,0.5)));
+	mainscene.add_sphere(Sphere(L, 2, Vector(1., 1., 1.), false, false,(l/(M_PI*2*2))*Vector(1,1,1)));
 
 	//Spheres
 	mainscene.add_sphere(Sphere(Vector(10., 0., 10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
@@ -320,6 +320,7 @@ int main() {
 	std::vector<unsigned char> image(W*H * 3, 0);
 	#pragma omp parallel for
 	for (int i = 0; i < H; i++) {
+		std::cout << i / H << std::endl;
 		for (int j = 0; j < W; j++) {
 			double d = W / (2 * tan(fov / 2));
 			

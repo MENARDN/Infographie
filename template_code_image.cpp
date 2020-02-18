@@ -230,7 +230,7 @@ public:
 				Vector I;
 				if (lighted) {
 					double p = costhetasecond / (M_PI * 4 * M_PI * Spheres[0].R * Spheres[0].R);
-					I = (Spheres[0].Emi * albedo / M_PI * costheta * costhetaprime) / (d2 * p);
+					I = ((Spheres[0].Emi * albedo / M_PI * costheta * costhetaprime) / (d2 * p))+;
 				}
 				else {
 					I = Vector(0., 0., 0.);
@@ -293,7 +293,7 @@ int main() {
 	double fov = 60 * M_PI / 180;
 	Vector C(0, 0, 55);
 
-	double distance_mise_au_pount = 55;
+	double distance_mise_au_point = 55;
 
 	Vector L(-10, 20, 40);
 	double l = 4e7;
@@ -338,7 +338,7 @@ int main() {
 				double x1b = R * cos(2 * M_PI * r2) * 0.25;
 				double x2b = R * sin(2 * M_PI * r2) * 0.25;
 				Vector Cprime = C + Vector(x1b, x2b, 0);
-				Vector uprime = C + distance_mise_au_pount * u - Cprime;
+				Vector uprime = C + distance_mise_au_point * u - Cprime;
 				uprime.normalize();
 
 				Ray rini(Cprime, uprime);

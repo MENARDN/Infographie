@@ -89,17 +89,33 @@ public:
 	Vector C, u;
 };
 
-class Sphere{
+
+class Object {
 public:
-	Sphere(const Vector& O, double R, const Vector& albedo, bool diffuse, bool transp, Vector Emi) : 
-		O(O), R(R), albedo(albedo), diffuse(diffuse), transp(transp), Emi(Emi) {};
+	Object() {}
+	Object(bool diffuse, bool transp, Vector albedo, Vector Emi) : diffuse(diffuse), transp(transp), albedo(albedo), Emi(Emi) {};
+
+	virtual bool intersect(const Ray& r, Vector& P, Vector& N, double& t) = 0;
+
+	void set_emi(Vector& E) {
+		Emi = E;
+	}
+
+	bool diffuse, transp;
+	Vector albedo;
+	Vector Emi = Vector(0, 0, 0);
+};
+
+class Sphere: public Object{
+public:
+	Sphere(const Vector& O, double R, const Vector& albedo, bool diffuse, bool transp, Vector Emi) :
+		Object(diffuse,transp,albedo,Emi), R(R) {};
 
 
-
-	bool intersect(const Ray& r, Vector &P, Vector &N, double t) {
+	bool intersect(const Ray& r, Vector &P, Vector &N, double &t) {
 		double a = 1;
 		double b = 2 * dot(r.u, r.C - O);
-		double c = (r.C - 0).Norm2() - R * R;
+		double c = (r.C - O).Norm2() - R * R;
 
 		double delta = b * b - 4 * a * c;
 		if (delta < 0) return false;
@@ -118,15 +134,8 @@ public:
 		return true;
 	}
 
-	void set_emi(Vector& E) {
-		Emi = E;
-	}
-
 	Vector O;
-	Vector albedo;
 	double R;
-	bool diffuse, transp;
-	Vector Emi = Vector(0,0,0);
 };
 
 Vector random_cos(const Vector& N) {
@@ -153,11 +162,6 @@ Vector random_cos(const Vector& N) {
 
 	return V[0] * T1 + V[1] * T2 + V[2] * N;
 }
-
-class Object {
-public:
-	bool intersect();
-};
 
 class Bbox {
 public:
@@ -192,7 +196,7 @@ public:
 		B = b;
 		C = c;
 	}
-	bool intersect(const Ray& r, Vector& P, Vector& N, double& t);
+	bool intersect(const Ray& r, Vector& P, Vector& N, double& t, double& beta, double &gamma);
 	Vector A, B, C;
 };
 
@@ -507,11 +511,15 @@ public:
 				for (int i = curNode->i0; i < curNode->i1; i++) {
 					Triangle tri(vertices[indices[i].vtxi], vertices[indices[i].vtxj], vertices[indices[i].vtxk]);
 					Vector localP, localN;
-					double localt;
-					if (tri.intersect(r, localP, localN, localt)) {
+					double localt, beta, gamma;
+					if (tri.intersect(r, localP, localN, localt, beta, gamma)) {
 						has_inter = true;
 						if (localt < t) {
 							t = localt;
+							P = localP;
+							//N = localN;
+							double alpha = 1 - beta - gamma;
+							N = alpha * normals[indices[i].ni] + beta * normals[indices[i].nj] + gamma * normals[indices[i].nk];
 						}
 					}
 				}
@@ -534,10 +542,19 @@ public:
 class Scene {
 public:
 	Scene() {}
-	std::vector<Sphere> Spheres;
+	std::vector<Object*> Spheres;
+	Vector Light_O, Light_Emi;
+	double Light_R;
 
-	void add_sphere(const Sphere& S) {
+	void add_sphere(Sphere* S) {
 		Spheres.push_back(S);
+	}
+
+	void set_light(Sphere* S) {
+		Spheres.push_back(S);
+		Light_O = S->O;
+		Light_R = S->R;
+		Light_Emi = S->Emi;
 	}
 
 	bool intersect(Ray r, Vector& P, Vector& N, Vector& albedo, bool& dif, bool& transp) {
@@ -546,31 +563,17 @@ public:
 		bool onscreen = false;
 		for (int unsigned i = 0; i < Spheres.size(); i++)
 		{
-			double a = 1;
-			double b = 2 * dot(r.u, r.C - Spheres[i].O);
-			double c = (r.C - Spheres[i].O).Norm2() - Spheres[i].R * Spheres[i].R;
-
-			double delta = b * b - 4 * a * c;
-			if (delta > 0) {
-				double sqrtDelta = sqrt(delta);
-				double t1 = (-b + sqrtDelta) / (2 * a);
-				double t0 = (-b - sqrtDelta) / (2 * a);
-				double t;
-				if (t1 > t0) {
-					t = t0;
-				}
-				else {
-					t = t1;
-				}
+			double t;
+			Vector localP, localN;
+			if (Spheres[i]->intersect(r,localP,localN,t)) {
 				if ((t < tmin || onscreen == false) && t > 0) {
 					tmin = t;
 					onscreen = true;
-					P = r.C + t * r.u;
-					N = P - Spheres[i].O;
-					N.normalize();
-					albedo = Spheres[i].albedo;
-					dif = Spheres[i].diffuse;
-					transp = Spheres[i].transp;
+					P = localP;
+					N = localN;
+					albedo = Spheres[i]->albedo;
+					dif = Spheres[i]->diffuse;
+					transp = Spheres[i]->transp;
 				}
 
 				intersected = true;
@@ -585,11 +588,11 @@ public:
 		bool has_inter = intersect(r, P, N, albedo, dif, transp);
 		if (has_inter) {
 			if (dif) {
-				Vector PL = P - Spheres[0].O;
+				Vector PL = P - Light_O;
 				PL.normalize();
 				Vector w = random_cos(PL);
 				w.normalize();
-				Vector xi = Spheres[0].O + Spheres[0].R * w;
+				Vector xi = Light_O + Light_R * w;
 				Vector wi = xi - P;
 				double d2 = wi.Norm2();
 				wi.normalize();
@@ -608,8 +611,8 @@ public:
 				}
 				Vector I;
 				if (lighted) {
-					double p = costhetasecond / (M_PI * 4 * M_PI * Spheres[0].R * Spheres[0].R);
-					I = ((Spheres[0].Emi * albedo / M_PI * costheta * costhetaprime) / (d2 * p));
+					double p = costhetasecond / (M_PI * 4 * M_PI * Light_R * Light_R);
+					I = ((Light_Emi * albedo / M_PI * costheta * costhetaprime) / (d2 * p));
 				}
 				else {
 					I = Vector(0., 0., 0.);
@@ -662,6 +665,8 @@ public:
 		}
 	}
 
+
+
 };
 
 int main() {
@@ -679,22 +684,22 @@ int main() {
 	Scene mainscene;
 
 	//Lightsource
-	mainscene.add_sphere(Sphere(L, 2, Vector(1., 1., 1.), false, false,(l/(M_PI*2*2))*Vector(1,1,1)));
+	mainscene.add_sphere(&Sphere(L, 2, Vector(1., 1., 1.), false, false, (l / (M_PI * 2 * 2)) * Vector(1, 1, 1)));
 
 	//Spheres
-	mainscene.add_sphere(Sphere(Vector(10., 0., 10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(Sphere(Vector(-10., 0., -10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(Sphere(Vector(0., 30., 0.), 12, Vector(1., 1., 1.), false, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(Sphere(Vector(20, 20., 10.), 5, Vector(1., 1., 1.), false, true, Vector(0, 0, 0)));
+	mainscene.add_sphere(&Sphere(Vector(10., 0., 10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
+	mainscene.add_sphere(&Sphere(Vector(-10., 0., -10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
+	mainscene.add_sphere(&Sphere(Vector(0., 30., 0.), 12, Vector(1., 1., 1.), false, false, Vector(0, 0, 0)));
+	mainscene.add_sphere(&Sphere(Vector(20, 20., 10.), 5, Vector(1., 1., 1.), false, true, Vector(0, 0, 0)));
 
 
 	//Walls
-	mainscene.add_sphere(Sphere(Vector(0., 0, -1000), 940, Vector(1., 0., 0.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(Sphere(Vector(0., 1000, 0), 940, Vector(0., 0., 1.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(Sphere(Vector(0., -1000, 0), 990, Vector(0., 1., 0.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(Sphere(Vector(0., 0., 1000), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(Sphere(Vector(990, 0., 0), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(Sphere(Vector(-990, 0., 0), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
+	mainscene.add_sphere(&Sphere(Vector(0., 0, -1000), 940, Vector(1., 0., 0.), true, false, Vector(0, 0, 0)));
+	mainscene.add_sphere(&Sphere(Vector(0., 1000, 0), 940, Vector(0., 0., 1.), true, false, Vector(0, 0, 0)));
+	mainscene.add_sphere(&Sphere(Vector(0., -1000, 0), 990, Vector(0., 1., 0.), true, false, Vector(0, 0, 0)));
+	mainscene.add_sphere(&Sphere(Vector(0., 0., 1000), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
+	mainscene.add_sphere(&Sphere(Vector(990, 0., 0), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
+	mainscene.add_sphere(&Sphere(Vector(-990, 0., 0), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
 
 	std::vector<unsigned char> image(W*H * 3, 0);
 	#pragma omp parallel for

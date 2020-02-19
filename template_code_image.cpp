@@ -109,7 +109,7 @@ public:
 class Sphere: public Object{
 public:
 	Sphere(const Vector& O, double R, const Vector& albedo, bool diffuse, bool transp, Vector Emi) :
-		Object(diffuse,transp,albedo,Emi), R(R) {};
+		Object(diffuse,transp,albedo,Emi), R(R), O(O) {};
 
 
 	bool intersect(const Ray& r, Vector &P, Vector &N, double &t) {
@@ -485,6 +485,8 @@ public:
 
 	bool intersect(const Ray& r, Vector& P, Vector& N, double& t) {
 		
+
+
 		std::list<BVH*> nodes;
 		nodes.push_back(&bvh);
 
@@ -586,8 +588,10 @@ public:
 		Vector P, N, albedo, Emi;
 		bool dif = true, transp = true;
 		bool has_inter = intersect(r, P, N, albedo, dif, transp);
+
 		if (has_inter) {
 			if (dif) {
+
 				Vector PL = P - Light_O;
 				PL.normalize();
 				Vector w = random_cos(PL);
@@ -684,27 +688,37 @@ int main() {
 	Scene mainscene;
 
 	//Lightsource
-	mainscene.add_sphere(&Sphere(L, 2, Vector(1., 1., 1.), false, false, (l / (M_PI * 2 * 2)) * Vector(1, 1, 1)));
+	Sphere Light = Sphere(L, 2, Vector(1., 1., 1.), false, false, (l / (M_PI * 2 * 2)) * Vector(1, 1, 1));
+	mainscene.set_light(&Light);
 
 	//Spheres
-	mainscene.add_sphere(&Sphere(Vector(10., 0., 10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(&Sphere(Vector(-10., 0., -10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(&Sphere(Vector(0., 30., 0.), 12, Vector(1., 1., 1.), false, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(&Sphere(Vector(20, 20., 10.), 5, Vector(1., 1., 1.), false, true, Vector(0, 0, 0)));
+	Sphere Sp1 = Sphere(Vector(10., 0., 10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
+	Sphere Sp2 = Sphere(Vector(-10., 0., -10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
+	Sphere Sp3 = Sphere(Vector(0., 30., 0.), 12, Vector(1., 1., 1.), false, false, Vector(0, 0, 0));
+	Sphere Sp4 = Sphere(Vector(20, 20., 10.), 5, Vector(1., 1., 1.), false, true, Vector(0, 0, 0));
+	mainscene.add_sphere(&Sp1);
+	mainscene.add_sphere(&Sp2);
+	mainscene.add_sphere(&Sp3);
+	mainscene.add_sphere(&Sp4);
 
 
 	//Walls
-	mainscene.add_sphere(&Sphere(Vector(0., 0, -1000), 940, Vector(1., 0., 0.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(&Sphere(Vector(0., 1000, 0), 940, Vector(0., 0., 1.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(&Sphere(Vector(0., -1000, 0), 990, Vector(0., 1., 0.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(&Sphere(Vector(0., 0., 1000), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(&Sphere(Vector(990, 0., 0), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
-	mainscene.add_sphere(&Sphere(Vector(-990, 0., 0), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0)));
+	Sphere W1 = Sphere(Vector(0., 0, -1000), 940, Vector(1., 0., 0.), true, false, Vector(0, 0, 0));
+	Sphere W2 = Sphere(Vector(0., 1000, 0), 940, Vector(0., 0., 1.), true, false, Vector(0, 0, 0));
+	Sphere W3 = Sphere(Vector(0., -1000, 0), 990, Vector(0., 1., 0.), true, false, Vector(0, 0, 0));
+	Sphere W4 = Sphere(Vector(0., 0., 1000), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
+	Sphere W5 = Sphere(Vector(990, 0., 0), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
+	Sphere W6 = Sphere(Vector(-990, 0., 0), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
+	mainscene.add_sphere(&W1);
+	mainscene.add_sphere(&W2);
+	mainscene.add_sphere(&W3);
+	mainscene.add_sphere(&W4);
+	mainscene.add_sphere(&W5);
+	mainscene.add_sphere(&W6);
 
 	std::vector<unsigned char> image(W*H * 3, 0);
 	#pragma omp parallel for
 	for (int i = 0; i < H; i++) {
-		std::cout << i / H << std::endl;
 		for (int j = 0; j < W; j++) {
 			double d = W / (2 * tan(fov / 2));
 			

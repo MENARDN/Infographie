@@ -166,7 +166,9 @@ Vector random_cos(const Vector& N) {
 class Bbox {
 public:
 	Bbox() {};
-	bool intersect(Ray r, double t) {}
+	bool intersect(const Ray& r, double& t) {
+		return false;
+	}
 
 	Vector m, M;
 };
@@ -196,7 +198,35 @@ public:
 		B = b;
 		C = c;
 	}
-	bool intersect(const Ray& r, Vector& P, Vector& N, double& t, double& beta, double &gamma);
+	bool intersect(const Ray& r, Vector& P, Vector& N, double& t, double& beta, double& gamma) {
+
+		Vector N = cross(B - A, C - A);
+		N.normalize();
+		double num = -1 * dot(r.C - A, N);
+		double den = dot(r.u, N);
+		if (den == 0) {
+			return false;
+		}
+		t = num / den;
+		if (t < 0) {
+			return false;
+		}
+		Vector P = r.C + t * r.u;
+		Vector v0 = C - A;
+		Vector v1 = B - A;
+		Vector v2 = P - A;
+		double dot00 = dot(v0, v0);
+		double dot01 = dot(v0, v1);
+		double dot02 = dot(v0, v2);
+		double dot11 = dot(v1, v1);
+		double dot12 = dot(v1, v2);
+		double inv_denom = 1 / (dot00 * dot11 - dot01 * dot01);
+		beta = (dot11 * dot02 - dot01 * dot12) * inv_denom;
+		gamma = (dot00 * dot12 - dot01 * dot02) * inv_denom;
+		return (beta >= 0 && gamma >= 0 && (beta + gamma) < 1);
+
+	}
+
 	Vector A, B, C;
 };
 
@@ -208,6 +238,7 @@ public:
 		for (int i = 0; i < vertices.size(); i++) {
 			vertices[i] = vertices[i] * scaling + offset;
 		}
+		std::cout << vertices.size() << std::endl;
 	}
 
 	void add_texture(const char* filename) {
@@ -485,8 +516,6 @@ public:
 
 	bool intersect(const Ray& r, Vector& P, Vector& N, double& t) {
 		
-
-
 		std::list<BVH*> nodes;
 		nodes.push_back(&bvh);
 
@@ -519,7 +548,6 @@ public:
 						if (localt < t) {
 							t = localt;
 							P = localP;
-							//N = localN;
 							double alpha = 1 - beta - gamma;
 							N = alpha * normals[indices[i].ni] + beta * normals[indices[i].nj] + gamma * normals[indices[i].nk];
 						}
@@ -544,16 +572,16 @@ public:
 class Scene {
 public:
 	Scene() {}
-	std::vector<Object*> Spheres;
+	std::vector<Object*> Objects;
 	Vector Light_O, Light_Emi;
 	double Light_R;
 
-	void add_sphere(Sphere* S) {
-		Spheres.push_back(S);
+	void add_objet(Object* S) {
+		Objects.push_back(S);
 	}
 
 	void set_light(Sphere* S) {
-		Spheres.push_back(S);
+		Objects.push_back(S);
 		Light_O = S->O;
 		Light_R = S->R;
 		Light_Emi = S->Emi;
@@ -563,19 +591,19 @@ public:
 		double tmin = -1;
 		bool intersected = false;
 		bool onscreen = false;
-		for (int unsigned i = 0; i < Spheres.size(); i++)
+		for (int unsigned i = 0; i < Objects.size(); i++)
 		{
 			double t;
 			Vector localP, localN;
-			if (Spheres[i]->intersect(r,localP,localN,t)) {
+			if (Objects[i]->intersect(r,localP,localN,t)) {
 				if ((t < tmin || onscreen == false) && t > 0) {
 					tmin = t;
 					onscreen = true;
 					P = localP;
 					N = localN;
-					albedo = Spheres[i]->albedo;
-					dif = Spheres[i]->diffuse;
-					transp = Spheres[i]->transp;
+					albedo = Objects[i]->albedo;
+					dif = Objects[i]->diffuse;
+					transp = Objects[i]->transp;
 				}
 
 				intersected = true;
@@ -641,10 +669,28 @@ public:
 				}
 				double inside_sqrt = 1 - pow(n1 / n2,2) * (1 - pow(dot(N_trans,r.u),2));
 				if (inside_sqrt > 0) {
-					Vector newu = (n1 / n2) * (r.u - dot(r.u,N_trans)*N_trans) - N_trans * sqrt(inside_sqrt);
+					double k0 = pow((n1 - n2), 2) / pow((n1 + n2), 2);
+					double R;
+					Vector newu = (n1 / n2) * (r.u - dot(r.u, N_trans) * N_trans) - N_trans * sqrt(inside_sqrt);
 					newu.normalize();
-					Ray newr(P - 0.0001 * N_trans, newu);
-					return getColor(newr, num_bounce - 1);
+					if (n1 < n2) {
+						R = k0 + (1 - k0) * pow(1 - dot(N_trans, -1*r.u), 5);
+					}
+					else {
+						R = k0 + (1 - k0) * pow(1 - dot(N_trans, newu), 5);
+					}
+					double r1 = distrib(engine[omp_get_thread_num()]);
+					if (r1 > R) {
+						Ray newr(P - 0.0001 * N_trans, newu);
+						return getColor(newr, num_bounce - 1);
+					}
+					else {
+						newu = r.u - 2 * dot(N_trans, r.u) * N_trans;
+						newu.normalize();
+						Ray newr(P + 0.0001 * N_trans, newu);
+						return getColor(newr, num_bounce - 1);
+					}
+
 				}
 				else {
 					Vector newu = r.u - 2 * dot(N_trans, r.u) * N_trans;
@@ -676,7 +722,7 @@ public:
 int main() {
 	int W = 512;
 	int H = 512;
-	int N_rays = 50;
+	int N_rays = 100;
 
 	double fov = 60 * M_PI / 180;
 	Vector C(0, 0, 55);
@@ -687,38 +733,48 @@ int main() {
 	double l = 4e7;
 	Scene mainscene;
 
+	//Sphere(const Vector& O, double R, const Vector& albedo, bool diffuse, bool transp, Vector Emi)
+
 	//Lightsource
 	Sphere Light = Sphere(L, 2, Vector(1., 1., 1.), false, false, (l / (M_PI * 2 * 2)) * Vector(1, 1, 1));
 	mainscene.set_light(&Light);
+
+	/*
 
 	//Spheres
 	Sphere Sp1 = Sphere(Vector(10., 0., 10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
 	Sphere Sp2 = Sphere(Vector(-10., 0., -10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
 	Sphere Sp3 = Sphere(Vector(0., 30., 0.), 12, Vector(1., 1., 1.), false, false, Vector(0, 0, 0));
 	Sphere Sp4 = Sphere(Vector(20, 20., 10.), 5, Vector(1., 1., 1.), false, true, Vector(0, 0, 0));
-	mainscene.add_sphere(&Sp1);
-	mainscene.add_sphere(&Sp2);
-	mainscene.add_sphere(&Sp3);
-	mainscene.add_sphere(&Sp4);
+	mainscene.add_objet(&Sp1);
+	mainscene.add_objet(&Sp2);
+	mainscene.add_objet(&Sp3);
+	mainscene.add_objet(&Sp4);
 
+	*/
 
 	//Walls
 	Sphere W1 = Sphere(Vector(0., 0, -1000), 940, Vector(1., 0., 0.), true, false, Vector(0, 0, 0));
 	Sphere W2 = Sphere(Vector(0., 1000, 0), 940, Vector(0., 0., 1.), true, false, Vector(0, 0, 0));
 	Sphere W3 = Sphere(Vector(0., -1000, 0), 990, Vector(0., 1., 0.), true, false, Vector(0, 0, 0));
-	Sphere W4 = Sphere(Vector(0., 0., 1000), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
-	Sphere W5 = Sphere(Vector(990, 0., 0), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
-	Sphere W6 = Sphere(Vector(-990, 0., 0), 940, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
-	mainscene.add_sphere(&W1);
-	mainscene.add_sphere(&W2);
-	mainscene.add_sphere(&W3);
-	mainscene.add_sphere(&W4);
-	mainscene.add_sphere(&W5);
-	mainscene.add_sphere(&W6);
+	Sphere W4 = Sphere(Vector(0., 0., 1000), 940, Vector(1., 1., 0.), true, false, Vector(0, 0, 0));
+	Sphere W5 = Sphere(Vector(990, 0., 0), 940, Vector(1., 0., 1.), true, false, Vector(0, 0, 0));
+	Sphere W6 = Sphere(Vector(-990, 0., 0), 940, Vector(0., 1., 1.), true, false, Vector(0, 0, 0));
+	mainscene.add_objet(&W1);
+	mainscene.add_objet(&W2);
+	mainscene.add_objet(&W3);
+	mainscene.add_objet(&W4);
+	mainscene.add_objet(&W5);
+	mainscene.add_objet(&W6);
+
+	Mesh Girl = Mesh("girl.obj", 1, Vector(0, 0, 0));
 
 	std::vector<unsigned char> image(W*H * 3, 0);
 	#pragma omp parallel for
 	for (int i = 0; i < H; i++) {
+		if (omp_get_thread_num() == 7) {
+			std::cout << (800*i / H) - (700) << "%" << std::endl;
+		}
 		for (int j = 0; j < W; j++) {
 			double d = W / (2 * tan(fov / 2));
 			

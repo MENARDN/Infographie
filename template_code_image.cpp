@@ -167,7 +167,58 @@ class Bbox {
 public:
 	Bbox() {};
 	bool intersect(const Ray& r, double& t) {
-		return false;
+		bool inside = true;
+		Vector pos, plane;
+		for (int i = 0; i < 3; i++) {
+			if (r.C[i] < m[i]) {
+				inside = false;
+				pos[i] = -1;
+				plane[i] = m[i];
+			}
+			else if (r.C[i] > M[i])  {
+				inside = false;
+				pos[i] = 1;
+				plane[i] = M[i];
+			}
+			else {
+				pos[i] = 0;
+			}
+		}
+		if (inside) {
+			t = 0;
+			return true;
+		}
+
+		Vector T;
+		for (int i = 0; i < 3; i++) {
+			if (pos[i] != 0 && r.u[i] != 0) {
+				T[i] = (plane[i] - r.C[i]) / r.u[i];
+			}
+			else {
+				T[i] = -1;
+			}
+		}
+
+		int whichPlane = 0;
+		for (int i = 1; i < 3; i++)
+			if (T[whichPlane] < T[i])
+				whichPlane = i;
+
+		if (T[whichPlane] < 0.) return (false);
+
+		Vector P;
+
+		for (int i = 0; i < 3; i++)
+			if (whichPlane != i) {
+				P[i] = r.C[i] + T[whichPlane] * r.u[i];
+				if (P[i] < m[i] || r.C[i] > M[i])
+					return (false);
+			}
+			else {
+				P[i] = plane[i];
+			}
+		t = T[whichPlane];
+		return true;
 	}
 
 	Vector m, M;
@@ -200,7 +251,7 @@ public:
 	}
 	bool intersect(const Ray& r, Vector& P, Vector& N, double& t, double& beta, double& gamma) {
 
-		Vector N = cross(B - A, C - A);
+		N = cross(B - A, C - A);
 		N.normalize();
 		double num = -1 * dot(r.C - A, N);
 		double den = dot(r.u, N);
@@ -211,7 +262,7 @@ public:
 		if (t < 0) {
 			return false;
 		}
-		Vector P = r.C + t * r.u;
+		P = r.C + t * r.u;
 		Vector v0 = C - A;
 		Vector v1 = B - A;
 		Vector v2 = P - A;
@@ -239,6 +290,15 @@ public:
 			vertices[i] = vertices[i] * scaling + offset;
 		}
 		std::cout << vertices.size() << std::endl;
+
+		build_bvh(0, vertices.size(),&bvh);
+
+		std::cout << bvh.b.m[0] << std::endl;
+		std::cout << bvh.b.m[1] << std::endl;
+		std::cout << bvh.b.m[2] << std::endl;
+		std::cout << bvh.b.M[0] << std::endl;
+		std::cout << bvh.b.M[1] << std::endl;
+		std::cout << bvh.b.M[2] << std::endl;
 	}
 
 	void add_texture(const char* filename) {
@@ -461,11 +521,11 @@ public:
 			TriangleIndices tid = indices[i];
 			for (int j = 0; j < 3; j++) {
 				bbox.m[j] = std::min(bbox.m[j], vertices[tid.vtxi][j]);
-				bbox.M[j] = std::min(bbox.M[j], vertices[tid.vtxi][j]);
+				bbox.M[j] = std::max(bbox.M[j], vertices[tid.vtxi][j]);
 				bbox.m[j] = std::min(bbox.m[j], vertices[tid.vtxj][j]);
-				bbox.M[j] = std::min(bbox.M[j], vertices[tid.vtxj][j]);
+				bbox.M[j] = std::max(bbox.M[j], vertices[tid.vtxj][j]);
 				bbox.m[j] = std::min(bbox.m[j], vertices[tid.vtxk][j]);
-				bbox.M[j] = std::min(bbox.M[j], vertices[tid.vtxk][j]);
+				bbox.M[j] = std::max(bbox.M[j], vertices[tid.vtxk][j]);
 			}
 		}
 		return bbox;
@@ -515,7 +575,7 @@ public:
 	}
 
 	bool intersect(const Ray& r, Vector& P, Vector& N, double& t) {
-		
+		/*
 		std::list<BVH*> nodes;
 		nodes.push_back(&bvh);
 
@@ -528,11 +588,13 @@ public:
 			if (curNode->fg) {
 				double tleft, tright;
 				if (curNode->fg->b.intersect(r, tleft)) {
+					std::cout << "Intersected Bbox" << std::endl;
 					if (tleft < t) {
 						nodes.push_front(curNode->fg);
 					}
 				}
 				if (curNode->fd->b.intersect(r, tright)) {
+					std::cout << "Intersected Bbox" << std::endl;
 					if (tright < t) {
 						nodes.push_front(curNode->fd);
 					}
@@ -544,6 +606,7 @@ public:
 					Vector localP, localN;
 					double localt, beta, gamma;
 					if (tri.intersect(r, localP, localN, localt, beta, gamma)) {
+						std::cout << "Intersected Triangle" << std::endl;
 						has_inter = true;
 						if (localt < t) {
 							t = localt;
@@ -555,7 +618,26 @@ public:
 				}
 			}
 		}
+		*/
+		bool has_inter = false;
+		t = 1E9;
+		for (int i = 0; i < indices.size(); i++) {
+			Triangle tri(vertices[indices[i].vtxi], vertices[indices[i].vtxj], vertices[indices[i].vtxk]);
+			Vector localP, localN;
+			double localt, beta, gamma;
+			if (tri.intersect(r, localP, localN, localt, beta, gamma)) {
+				has_inter = true;
+				if (localt < t) {
+					t = localt;
+					P = localP;
+					double alpha = 1 - beta - gamma;
+					N = alpha * normals[indices[i].ni] + beta * normals[indices[i].nj] + gamma * normals[indices[i].nk];
+				}
+			}
+		}
+		return has_inter;
 	}
+
 	BVH bvh;
 	std::vector<TriangleIndices> indices;
 	std::vector<Vector> vertices;
@@ -767,13 +849,16 @@ int main() {
 	mainscene.add_objet(&W5);
 	mainscene.add_objet(&W6);
 
-	Mesh Girl = Mesh("girl.obj", 1, Vector(0, 0, 0));
+	Mesh Girl = Mesh("cube.obj", 10, Vector(0, 0, 0));
+	mainscene.add_objet(&Girl);
 
 	std::vector<unsigned char> image(W*H * 3, 0);
+
+	int num_core = 1;
 	#pragma omp parallel for
 	for (int i = 0; i < H; i++) {
-		if (omp_get_thread_num() == 7) {
-			std::cout << (800*i / H) - (700) << "%" << std::endl;
+		if (omp_get_thread_num() == num_core-1) {
+			std::cout << (100*i*(num_core) / H) - ((num_core-1)*100) << "%" << std::endl;
 		}
 		for (int j = 0; j < W; j++) {
 			double d = W / (2 * tan(fov / 2));
@@ -797,7 +882,7 @@ int main() {
 				uprime.normalize();
 
 				Ray rini(Cprime, uprime);
-				I = I + mainscene.getColor(rini, 2);
+				I = I + mainscene.getColor(rini, 1);
 			}
 			I = I / N_rays;
 			image[(i * W + j) * 3 + 0] = std::min(255, std::max(0, int(pow(I[0], 0.45))));

@@ -251,7 +251,7 @@ public:
 	}
 	bool intersect(const Ray& r, Vector& P, Vector& N, double& t, double& beta, double& gamma) {
 
-		N = cross(B - A, C - A);
+		N = -1 * cross(B - A, C - A);
 		N.normalize();
 		double num = -1 * dot(r.C - A, N);
 		double den = dot(r.u, N);
@@ -284,7 +284,7 @@ public:
 class Mesh : public Object {
 public:
 	Mesh() {}
-	Mesh(const char* obj, double scaling, const Vector& offset) {
+	Mesh(const char* obj, double scaling, const Vector& offset, bool diffuse, bool transp, Vector albedo, Vector Emi) : Object(diffuse, transp, albedo, Emi) {
 		readOBJ(obj);
 		for (int i = 0; i < vertices.size(); i++) {
 			vertices[i] = vertices[i] * scaling + offset;
@@ -621,6 +621,10 @@ public:
 		*/
 		bool has_inter = false;
 		t = 1E9;
+		double tbox;
+		if (!bvh.b.intersect(r, tbox)) {
+			return false;
+		}
 		for (int i = 0; i < indices.size(); i++) {
 			Triangle tri(vertices[indices[i].vtxi], vertices[indices[i].vtxj], vertices[indices[i].vtxk]);
 			Vector localP, localN;
@@ -630,6 +634,7 @@ public:
 				if (localt < t) {
 					t = localt;
 					P = localP;
+					//N = localN;
 					double alpha = 1 - beta - gamma;
 					N = alpha * normals[indices[i].ni] + beta * normals[indices[i].nj] + gamma * normals[indices[i].nk];
 				}
@@ -821,19 +826,19 @@ int main() {
 	Sphere Light = Sphere(L, 2, Vector(1., 1., 1.), false, false, (l / (M_PI * 2 * 2)) * Vector(1, 1, 1));
 	mainscene.set_light(&Light);
 
-	/*
+	
 
 	//Spheres
 	Sphere Sp1 = Sphere(Vector(10., 0., 10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
 	Sphere Sp2 = Sphere(Vector(-10., 0., -10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
 	Sphere Sp3 = Sphere(Vector(0., 30., 0.), 12, Vector(1., 1., 1.), false, false, Vector(0, 0, 0));
 	Sphere Sp4 = Sphere(Vector(20, 20., 10.), 5, Vector(1., 1., 1.), false, true, Vector(0, 0, 0));
-	mainscene.add_objet(&Sp1);
-	mainscene.add_objet(&Sp2);
+	//mainscene.add_objet(&Sp1);
+	//mainscene.add_objet(&Sp2);
 	mainscene.add_objet(&Sp3);
-	mainscene.add_objet(&Sp4);
+	//mainscene.add_objet(&Sp4);
 
-	*/
+	
 
 	//Walls
 	Sphere W1 = Sphere(Vector(0., 0, -1000), 940, Vector(1., 0., 0.), true, false, Vector(0, 0, 0));
@@ -849,12 +854,12 @@ int main() {
 	mainscene.add_objet(&W5);
 	mainscene.add_objet(&W6);
 
-	Mesh Girl = Mesh("cube.obj", 10, Vector(0, 0, 0));
+	Mesh Girl = Mesh("cube.obj", 10, Vector(20, -10, 0),true,false,Vector(1,1,1),Vector(0,0,0));
 	mainscene.add_objet(&Girl);
 
 	std::vector<unsigned char> image(W*H * 3, 0);
 
-	int num_core = 1;
+	int num_core = 8;
 	#pragma omp parallel for
 	for (int i = 0; i < H; i++) {
 		if (omp_get_thread_num() == num_core-1) {
@@ -882,7 +887,7 @@ int main() {
 				uprime.normalize();
 
 				Ray rini(Cprime, uprime);
-				I = I + mainscene.getColor(rini, 1);
+				I = I + mainscene.getColor(rini, 2);
 			}
 			I = I / N_rays;
 			image[(i * W + j) * 3 + 0] = std::min(255, std::max(0, int(pow(I[0], 0.45))));

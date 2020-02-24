@@ -211,7 +211,7 @@ public:
 		for (int i = 0; i < 3; i++)
 			if (whichPlane != i) {
 				P[i] = r.C[i] + T[whichPlane] * r.u[i];
-				if (P[i] < m[i] || r.C[i] > M[i])
+				if (P[i] < m[i] || P[i] > M[i])
 					return (false);
 			}
 			else {
@@ -289,16 +289,11 @@ public:
 		for (int i = 0; i < vertices.size(); i++) {
 			vertices[i] = vertices[i] * scaling + offset;
 		}
-		std::cout << vertices.size() << std::endl;
+		std::cout << indices.size() << std::endl;
 
-		build_bvh(0, vertices.size(),&bvh);
+		build_bvh(0, indices.size(),&bvh);
 
-		std::cout << bvh.b.m[0] << std::endl;
-		std::cout << bvh.b.m[1] << std::endl;
-		std::cout << bvh.b.m[2] << std::endl;
-		std::cout << bvh.b.M[0] << std::endl;
-		std::cout << bvh.b.M[1] << std::endl;
-		std::cout << bvh.b.M[2] << std::endl;
+
 	}
 
 	void add_texture(const char* filename) {
@@ -575,26 +570,29 @@ public:
 	}
 
 	bool intersect(const Ray& r, Vector& P, Vector& N, double& t) {
-		/*
+		
+		double tbox;
+		if (!bvh.b.intersect(r, tbox)) {
+			return false;
+		}
+
 		std::list<BVH*> nodes;
 		nodes.push_back(&bvh);
 
 		bool has_inter = false;
 		t = 1E9;
 
-		while (nodes.empty()) {
+		while (!nodes.empty()) {
 			BVH* curNode = nodes.front();
 			nodes.pop_front();
 			if (curNode->fg) {
 				double tleft, tright;
 				if (curNode->fg->b.intersect(r, tleft)) {
-					std::cout << "Intersected Bbox" << std::endl;
 					if (tleft < t) {
 						nodes.push_front(curNode->fg);
 					}
 				}
 				if (curNode->fd->b.intersect(r, tright)) {
-					std::cout << "Intersected Bbox" << std::endl;
 					if (tright < t) {
 						nodes.push_front(curNode->fd);
 					}
@@ -606,7 +604,6 @@ public:
 					Vector localP, localN;
 					double localt, beta, gamma;
 					if (tri.intersect(r, localP, localN, localt, beta, gamma)) {
-						std::cout << "Intersected Triangle" << std::endl;
 						has_inter = true;
 						if (localt < t) {
 							t = localt;
@@ -615,28 +612,6 @@ public:
 							N = alpha * normals[indices[i].ni] + beta * normals[indices[i].nj] + gamma * normals[indices[i].nk];
 						}
 					}
-				}
-			}
-		}
-		*/
-		bool has_inter = false;
-		t = 1E9;
-		double tbox;
-		if (!bvh.b.intersect(r, tbox)) {
-			return false;
-		}
-		for (int i = 0; i < indices.size(); i++) {
-			Triangle tri(vertices[indices[i].vtxi], vertices[indices[i].vtxj], vertices[indices[i].vtxk]);
-			Vector localP, localN;
-			double localt, beta, gamma;
-			if (tri.intersect(r, localP, localN, localt, beta, gamma)) {
-				has_inter = true;
-				if (localt < t) {
-					t = localt;
-					P = localP;
-					//N = localN;
-					double alpha = 1 - beta - gamma;
-					N = alpha * normals[indices[i].ni] + beta * normals[indices[i].nj] + gamma * normals[indices[i].nk];
 				}
 			}
 		}
@@ -703,7 +678,6 @@ public:
 		Vector P, N, albedo, Emi;
 		bool dif = true, transp = true;
 		bool has_inter = intersect(r, P, N, albedo, dif, transp);
-
 		if (has_inter) {
 			if (dif) {
 
@@ -809,7 +783,7 @@ public:
 int main() {
 	int W = 512;
 	int H = 512;
-	int N_rays = 100;
+	int N_rays = 50;
 
 	double fov = 60 * M_PI / 180;
 	Vector C(0, 0, 55);
@@ -835,7 +809,7 @@ int main() {
 	Sphere Sp4 = Sphere(Vector(20, 20., 10.), 5, Vector(1., 1., 1.), false, true, Vector(0, 0, 0));
 	//mainscene.add_objet(&Sp1);
 	//mainscene.add_objet(&Sp2);
-	mainscene.add_objet(&Sp3);
+	//mainscene.add_objet(&Sp3);
 	//mainscene.add_objet(&Sp4);
 
 	
@@ -843,7 +817,7 @@ int main() {
 	//Walls
 	Sphere W1 = Sphere(Vector(0., 0, -1000), 940, Vector(1., 0., 0.), true, false, Vector(0, 0, 0));
 	Sphere W2 = Sphere(Vector(0., 1000, 0), 940, Vector(0., 0., 1.), true, false, Vector(0, 0, 0));
-	Sphere W3 = Sphere(Vector(0., -1000, 0), 990, Vector(0., 1., 0.), true, false, Vector(0, 0, 0));
+	Sphere W3 = Sphere(Vector(0., -1020, 0), 990, Vector(0., 1., 0.), true, false, Vector(0, 0, 0));
 	Sphere W4 = Sphere(Vector(0., 0., 1000), 940, Vector(1., 1., 0.), true, false, Vector(0, 0, 0));
 	Sphere W5 = Sphere(Vector(990, 0., 0), 940, Vector(1., 0., 1.), true, false, Vector(0, 0, 0));
 	Sphere W6 = Sphere(Vector(-990, 0., 0), 940, Vector(0., 1., 1.), true, false, Vector(0, 0, 0));
@@ -854,17 +828,15 @@ int main() {
 	mainscene.add_objet(&W5);
 	mainscene.add_objet(&W6);
 
-	Mesh Girl = Mesh("cube.obj", 10, Vector(20, -10, 0),true,false,Vector(1,1,1),Vector(0,0,0));
+	Mesh Girl = Mesh("girl.obj", 25, Vector(0, -15, 10), true, false, Vector(1, 1, 1), Vector(0, 0, 0));
 	mainscene.add_objet(&Girl);
 
 	std::vector<unsigned char> image(W*H * 3, 0);
 
-	int num_core = 8;
+	int num_core = 4;
 	#pragma omp parallel for
 	for (int i = 0; i < H; i++) {
-		if (omp_get_thread_num() == num_core-1) {
-			std::cout << (100*i*(num_core) / H) - ((num_core-1)*100) << "%" << std::endl;
-		}
+			std::cout << "Thread " << omp_get_thread_num() << ": " << (100*i*(num_core) / H) - ((omp_get_thread_num())*100) << "%" << std::endl;
 		for (int j = 0; j < W; j++) {
 			double d = W / (2 * tan(fov / 2));
 			
@@ -887,7 +859,7 @@ int main() {
 				uprime.normalize();
 
 				Ray rini(Cprime, uprime);
-				I = I + mainscene.getColor(rini, 2);
+				I = I + mainscene.getColor(rini, 1);
 			}
 			I = I / N_rays;
 			image[(i * W + j) * 3 + 0] = std::min(255, std::max(0, int(pow(I[0], 0.45))));

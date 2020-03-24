@@ -95,7 +95,7 @@ public:
 	Object() {}
 	Object(bool diffuse, bool transp, Vector albedo, Vector Emi) : diffuse(diffuse), transp(transp), albedo(albedo), Emi(Emi) {};
 
-	virtual bool intersect(const Ray& r, Vector& P, Vector& N, double& t) = 0;
+	virtual bool intersect(const Ray& r, Vector& P, Vector& N, double& t, Vector& albedo) = 0;
 
 	void set_emi(Vector& E) {
 		Emi = E;
@@ -112,7 +112,7 @@ public:
 		Object(diffuse,transp,albedo,Emi), R(R), O(O) {};
 
 
-	bool intersect(const Ray& r, Vector &P, Vector &N, double &t) {
+	bool intersect(const Ray& r, Vector &P, Vector &N, double &t, Vector& albedo2) {
 		double a = 1;
 		double b = 2 * dot(r.u, r.C - O);
 		double c = (r.C - O).Norm2() - R * R;
@@ -131,6 +131,7 @@ public:
 		P = r.C + t * r.u;
 		N = P-O;
 		N.normalize();
+		albedo2 = albedo;
 		return true;
 	}
 
@@ -159,6 +160,31 @@ Vector random_cos(const Vector& N) {
 	V[0] = cos(2 * M_PI * r1) * sqrt(1 - r2);
 	V[1] = sin(2 * M_PI * r1) * sqrt(1 - r2);
 	V[2] = sqrt(r2);
+
+	return V[0] * T1 + V[1] * T2 + V[2] * N;
+}
+
+Vector random_phobos(const Vector& N, const int& n) {
+	//orthogonal frame:
+	Vector T1;
+	if (std::abs(N[0]) <= std::abs(N[1]) && std::abs(N[0]) <= std::abs(N[2])) {
+		T1 = Vector(0, -N[2], N[1]);
+	}
+	else if (std::abs(N[1]) <= std::abs(N[0]) && std::abs(N[1]) <= std::abs(N[2])) {
+		T1 = Vector(-N[2], 0, N[0]);
+	}
+	else {
+		T1 = Vector(-N[1], N[0], 0);
+	}
+	T1.normalize();
+	Vector T2 = cross(N, T1);
+
+	double r1 = distrib(engine[omp_get_thread_num()]);
+	double r2 = distrib(engine[omp_get_thread_num()]);
+	Vector V;
+	V[0] = cos(2 * M_PI * r1) * sqrt(1 - pow(r2, (2 / (n + 1))));
+	V[1] = sin(2 * M_PI * r1) * sqrt(1 - pow(r2, (2 / (n + 1))));
+	V[2] = pow(r2,1/(n+1));
 
 	return V[0] * T1 + V[1] * T2 + V[2] * N;
 }
@@ -296,28 +322,17 @@ public:
 
 	}
 
+
+	std::vector<unsigned char*> textures;
+	std::vector<int> texwidth, texheight;
 	void add_texture(const char* filename) {
-
+		int comp;
+		texheight.resize(texheight.size() + 1);
+		texwidth.resize(texwidth.size() + 1);
 		textures.resize(textures.size() + 1);
-		w.resize(w.size() + 1);
-		h.resize(h.size() + 1);
-
-		FILE* f;
-		f = fopen(filename, "rb");
-		unsigned char info[54];
-		fread(info, sizeof(unsigned char), 54, f); // read the 54-byte header
-
-		w[w.size() - 1] = *(int*)&info[18]; // extract image height and width from header
-		h[h.size() - 1] = *(int*)&info[22];
-
-		int size = 3 * w[w.size() - 1] * h[h.size() - 1];
-		textures[textures.size() - 1].resize(size); // allocate 3 bytes per pixel
-		fread(&textures[textures.size() - 1][0], sizeof(unsigned char), size, f); // read the rest of the data at once
-		fclose(f);
-
-		for (int i = 0; i < size; i += 3) {
-			std::swap(textures[textures.size() - 1][i], textures[textures.size() - 1][i + 2]);
-		}
+		int id = texheight.size() - 1;
+		unsigned char* values = stbi_load(filename, &texwidth[id], &texheight[id], &comp, 3);
+		textures[id] = values;
 	}
 
 	void readOBJ(const char* obj) {
@@ -569,7 +584,7 @@ public:
 		}
 	}
 
-	bool intersect(const Ray& r, Vector& P, Vector& N, double& t) {
+	bool intersect(const Ray& r, Vector& P, Vector& N, double& t, Vector& albedo2) {
 		
 		double tbox;
 		if (!bvh.b.intersect(r, tbox)) {
@@ -610,6 +625,17 @@ public:
 							P = localP;
 							double alpha = 1 - beta - gamma;
 							N = alpha * normals[indices[i].ni] + beta * normals[indices[i].nj] + gamma * normals[indices[i].nk];
+							N.normalize();
+							Vector UV = alpha * uvs[indices[i].uvi] + beta * uvs[indices[i].uvj] + gamma * uvs[indices[i].uvk];
+							int ind_text = indices[i].faceGroup;
+							int Wid = texwidth[ind_text];
+							int Hei = texheight[ind_text];
+							int texX = std::min(Wid - 1, std::max(0, (int)(Wid*UV[0])));
+							int texY = std::min(Hei - 1, std::max(0, (int)(Hei * (1-UV[1]))));
+							Vector texcolor = Vector(textures[ind_text][texY * Wid * 3 + texX * 3],
+								textures[ind_text][texY * Wid * 3 + texX * 3 + 1],
+								textures[ind_text][texY * Wid * 3 + texX * 3 + 2]) / 255;
+							albedo2 = Vector(1, 1, 1);
 						}
 					}
 				}
@@ -624,8 +650,6 @@ public:
 	std::vector<Vector> normals;
 	std::vector<Vector> uvs;
 	std::vector<Vector> vertexcolors;
-
-	std::vector<std::vector<unsigned char> > textures;
 	std::vector<int> w, h;
 
 
@@ -657,13 +681,14 @@ public:
 		{
 			double t;
 			Vector localP, localN;
-			if (Objects[i]->intersect(r,localP,localN,t)) {
+			Vector albedo2;
+			if (Objects[i]->intersect(r,localP,localN,t,albedo2)) {
 				if ((t < tmin || onscreen == false) && t > 0) {
 					tmin = t;
 					onscreen = true;
 					P = localP;
 					N = localN;
-					albedo = Objects[i]->albedo;
+					albedo = albedo2;
 					dif = Objects[i]->diffuse;
 					transp = Objects[i]->transp;
 				}
@@ -705,16 +730,36 @@ public:
 				Vector I;
 				if (lighted) {
 					double p = costhetasecond / (M_PI * 4 * M_PI * Light_R * Light_R);
+					Vector refl = r.u + 2 * dot(wi, N) * N;
+					//Vector rhos = ks * albedo;
+					//Vector brdf = albedo / M_PI + pow(dot(refl,wi),n)*(n+2)/(2.*M_PI)*rhos;
 					I = ((Light_Emi * albedo / M_PI * costheta * costhetaprime) / (d2 * p));
 				}
 				else {
 					I = Vector(0., 0., 0.);
 				}
 				if (num_bounce != 0) {
-					Vector wj = random_cos(N);
-					wj.normalize();
-					Vector indirect = getColor(Ray(P + 0.0001 * N, wj), num_bounce - 1);
-					I = I + indirect * (albedo / M_PI);
+					/*
+					double randu = distrib(engine[omp_get_thread_num()]);
+					//double pd = (col[0] + col[1] + col[2]) / 3.;
+					pd = pd / (pd + (rhos[0] + rhos[1] + rhos[2]) / 3);
+					if (randu < pd) {
+						Vector wj = random_cos(N);
+						wj.normalize();
+						Vector indirect = getColor(Ray(P + 0.0001 * N, wj), num_bounce - 1);
+						I = I + indirect * (albedo / M_PI)/pd;
+					}
+					else {
+						Vector wj = random_phobos(refl,n);
+						if (dot(N, wj) < 0) return Vector(0, 0, 0);
+						Vector indirect = getColor(Ray(P + 0.0001 * N, wj), num_bounce - 1);
+						I = I + rhos * dot(N, wj) * (n + 2) / (n + 1) * indirect / (1 - pd);
+					}*/
+				Vector wj = random_cos(N);
+				wj.normalize();
+				Vector indirect = getColor(Ray(P + 0.0001 * N, wj), num_bounce - 1);
+				I = I + indirect * (albedo / M_PI);
+					
 				}
 				return I;
 
@@ -783,7 +828,7 @@ public:
 int main() {
 	int W = 512;
 	int H = 512;
-	int N_rays = 50;
+	int N_rays = 10;
 
 	double fov = 60 * M_PI / 180;
 	Vector C(0, 0, 55);
@@ -828,7 +873,14 @@ int main() {
 	mainscene.add_objet(&W5);
 	mainscene.add_objet(&W6);
 
-	Mesh Girl = Mesh("girl.obj", 25, Vector(0, -15, 10), true, false, Vector(1, 1, 1), Vector(0, 0, 0));
+	Mesh Girl = Mesh("girl.obj", 25, Vector(0, -20, 10), true, false, Vector(1, 1, 1), Vector(0, 0, 0));
+	Girl.add_texture("12c14c70.bmp");
+	Girl.add_texture("12dbd6d0.bmp");
+	Girl.add_texture("16c2e0d0.bmp");
+	Girl.add_texture("16cecd10.bmp");
+	Girl.add_texture("19d89130.bmp");
+	Girl.add_texture("13932ef0.bmp");
+
 	mainscene.add_objet(&Girl);
 
 	std::vector<unsigned char> image(W*H * 3, 0);
@@ -836,7 +888,7 @@ int main() {
 	int num_core = 4;
 	#pragma omp parallel for
 	for (int i = 0; i < H; i++) {
-			std::cout << "Thread " << omp_get_thread_num() << ": " << (100*i*(num_core) / H) - ((omp_get_thread_num())*100) << "%" << std::endl;
+		//std::cout << "Thread " << omp_get_thread_num() << ": " << (100*i*(num_core) / H) - ((omp_get_thread_num())*100) << "%" << std::endl;
 		for (int j = 0; j < W; j++) {
 			double d = W / (2 * tan(fov / 2));
 			

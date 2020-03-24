@@ -272,8 +272,8 @@ public:
 		double dot11 = dot(v1, v1);
 		double dot12 = dot(v1, v2);
 		double inv_denom = 1 / (dot00 * dot11 - dot01 * dot01);
-		beta = (dot11 * dot02 - dot01 * dot12) * inv_denom;
-		gamma = (dot00 * dot12 - dot01 * dot02) * inv_denom;
+		gamma = (dot11 * dot02 - dot01 * dot12) * inv_denom;
+		beta = (dot00 * dot12 - dot01 * dot02) * inv_denom;
 		return (beta >= 0 && gamma >= 0 && (beta + gamma) < 1);
 
 	}
@@ -610,6 +610,7 @@ public:
 							P = localP;
 							double alpha = 1 - beta - gamma;
 							N = alpha * normals[indices[i].ni] + beta * normals[indices[i].nj] + gamma * normals[indices[i].nk];
+							//N = localN;
 						}
 					}
 				}
@@ -783,7 +784,7 @@ public:
 int main() {
 	int W = 512;
 	int H = 512;
-	int N_rays = 50;
+	int N_rays = 500;
 
 	double fov = 60 * M_PI / 180;
 	Vector C(0, 0, 55);
@@ -833,7 +834,7 @@ int main() {
 
 	std::vector<unsigned char> image(W*H * 3, 0);
 
-	int num_core = 4;
+	int num_core = 8;
 	#pragma omp parallel for
 	for (int i = 0; i < H; i++) {
 			std::cout << "Thread " << omp_get_thread_num() << ": " << (100*i*(num_core) / H) - ((omp_get_thread_num())*100) << "%" << std::endl;

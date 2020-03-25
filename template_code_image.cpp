@@ -800,7 +800,7 @@ int main() {
 	double fov = 60 * M_PI / 180;
 	Vector C(0, 0, 55);
 
-	double distance_mise_au_point = 55;
+	double profondeur = 55;
 
 	Vector L(-10, 20, 40);
 	double l = 8e7;
@@ -816,8 +816,8 @@ int main() {
 	
 
 	//Spheres
-	Sphere Sp1 = Sphere(Vector(10., 0., 0.), 10, Vector(1., 1., 1.), false, false, Vector(0, 0, 0));
-	Sphere Sp2 = Sphere(Vector(-10., 0., 0.), 10, Vector(1., 1., 1.), false, false, Vector(0, 0, 0));
+	Sphere Sp1 = Sphere(Vector(10., 0., 30.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
+	Sphere Sp2 = Sphere(Vector(-10., 0., 0.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
 	Sphere Sp3 = Sphere(Vector(0., 30., 0.), 12, Vector(1., 1., 1.), false, false, Vector(0, 0, 0));
 	Sphere Sp4 = Sphere(Vector(20, 20., 10.), 5, Vector(1., 1., 1.), false, true, Vector(0, 0, 0));
 	mainscene.add_objet(&Sp1);
@@ -861,6 +861,7 @@ int main() {
 			
 			Vector I(0, 0, 0);
 			for (int k = 0; k < N_rays; k++) {
+				//Antialiasing
 				double r1 = distrib(engine[omp_get_thread_num()]);
 				double r2 = distrib(engine[omp_get_thread_num()]);
 				double R = sqrt(-2 * log(r1));
@@ -869,16 +870,16 @@ int main() {
 				Vector u((j + x1 - 0.5 - W / 2 ),( -i + x2 - 0.5 + H / 2 ), -d);
 				u.normalize();
 
-				double r1b = distrib(engine[omp_get_thread_num()]);
-				double r2b = distrib(engine[omp_get_thread_num()]);
-				double x1b = R * cos(2 * M_PI * r2) * 0.25;
-				double x2b = R * sin(2 * M_PI * r2) * 0.25;
-				Vector Cprime = C + Vector(x1b, x2b, 0);
-				Vector uprime = C + distance_mise_au_point * u - Cprime;
-				uprime.normalize();
+				//Profondeur de champs
+				double rbis = distrib(engine[omp_get_thread_num()]);
+				double x1bis = R * cos(2 * M_PI * rbis) * 0.25;
+				double x2bis = R * sin(2 * M_PI * rbis) * 0.25;
+				Vector Cbis = C + Vector(x1bis, x2bis, 0);
+				Vector ubis = C + profondeur * u - Cbis;
+				ubis.normalize();
 
-				Ray rini(Cprime, uprime);
-				I = I + mainscene.getColor(rini, 5);
+				Ray rayon(Cbis, ubis);
+				I = I + mainscene.getColor(rayon, 5);
 			}
 			I = I / N_rays;
 			image[(i * W + j) * 3 + 0] = std::min(255, std::max(0, int(pow(I[0], 0.45))));

@@ -95,7 +95,7 @@ public:
 	Object() {}
 	Object(bool diffuse, bool transp, Vector albedo, Vector Emi) : diffuse(diffuse), transp(transp), albedo(albedo), Emi(Emi) {};
 
-	virtual bool intersect(const Ray& r, Vector& P, Vector& N, double& t) = 0;
+	virtual bool intersect(const Ray& r, Vector& P, Vector& N, double& t, Vector& albedo) = 0;
 
 	void set_emi(Vector& E) {
 		Emi = E;
@@ -112,7 +112,7 @@ public:
 		Object(diffuse,transp,albedo,Emi), R(R), O(O) {};
 
 
-	bool intersect(const Ray& r, Vector &P, Vector &N, double &t) {
+	bool intersect(const Ray& r, Vector &P, Vector &N, double &t,Vector& localalbedo) {
 		double a = 1;
 		double b = 2 * dot(r.u, r.C - O);
 		double c = (r.C - O).Norm2() - R * R;
@@ -130,6 +130,7 @@ public:
 		}
 		P = r.C + t * r.u;
 		N = P-O;
+		localalbedo = albedo;
 		N.normalize();
 		return true;
 	}
@@ -139,12 +140,12 @@ public:
 };
 
 Vector random_cos(const Vector& N) {
-	//orthogonal frame:
+
 	Vector T1;
-	if (std::abs(N[0]) <= std::abs(N[1]) && std::abs(N[0]) <= std::abs(N[2])) {
+	if (abs(N[0]) <= abs(N[1]) && abs(N[0]) <= abs(N[2])) {
 		T1 = Vector(0, -N[2], N[1]);
 	}
-	else if (std::abs(N[1]) <= std::abs(N[0]) && std::abs(N[1]) <= std::abs(N[2])) {
+	else if (abs(N[1]) <= abs(N[0]) && abs(N[1]) <= abs(N[2])) {
 		T1 = Vector(-N[2],0,N[0]);
 	}
 	else {
@@ -569,7 +570,7 @@ public:
 		}
 	}
 
-	bool intersect(const Ray& r, Vector& P, Vector& N, double& t) {
+	bool intersect(const Ray& r, Vector& P, Vector& N, double& t, Vector& localalbedo) {
 		
 		double tbox;
 		if (!bvh.b.intersect(r, tbox)) {
@@ -610,6 +611,16 @@ public:
 							P = localP;
 							double alpha = 1 - beta - gamma;
 							N = alpha * normals[indices[i].ni] + beta * normals[indices[i].nj] + gamma * normals[indices[i].nk];
+							N.normalize();
+							Vector UV = alpha * uvs[indices[i].uvi] + beta * uvs[indices[i].uvj] + gamma * uvs[indices[i].uvk];
+							int ind_text = indices[i].faceGroup;
+							int Wid = w[ind_text];
+							int Hei = h[ind_text];
+							int texX = std::min(Wid - 1, std::max(0, (int)(Wid * UV[0])));
+							int texY = std::min(Hei - 1, std::max(0, (int)(Hei * UV[1])));
+							localalbedo = Vector(textures[ind_text][texY * Wid * 3 + texX * 3],
+								textures[ind_text][texY * Wid * 3 + texX * 3 + 1],
+								textures[ind_text][texY * Wid * 3 + texX * 3 + 2]) / 255;
 							//N = localN;
 						}
 					}
@@ -657,14 +668,14 @@ public:
 		for (int unsigned i = 0; i < Objects.size(); i++)
 		{
 			double t;
-			Vector localP, localN;
-			if (Objects[i]->intersect(r,localP,localN,t)) {
+			Vector localP, localN, localalbedo;
+			if (Objects[i]->intersect(r,localP,localN,t,localalbedo)) {
 				if ((t < tmin || onscreen == false) && t > 0) {
 					tmin = t;
 					onscreen = true;
 					P = localP;
 					N = localN;
-					albedo = Objects[i]->albedo;
+					albedo = localalbedo;
 					dif = Objects[i]->diffuse;
 					transp = Objects[i]->transp;
 				}
@@ -722,14 +733,14 @@ public:
 			}
 			else if (transp && num_bounce != 0){
 				double n1 = 1;
-				double n2 = 1.7;
+				double n2 = 1.45;
 				Vector N_trans(N);
 				if (dot(r.u,N)>0) {
-					n1 = 1.7;
+					n1 = 1.45;
 					n2 = 1;
 					N_trans = -1*N;
 				}
-				double inside_sqrt = 1 - pow(n1 / n2,2) * (1 - pow(dot(N_trans,r.u),2));
+				double inside_sqrt = 1 - pow(n1 / n2,2) * (1 - pow(dot(r.u,N_trans),2));
 				if (inside_sqrt > 0) {
 					double k0 = pow((n1 - n2), 2) / pow((n1 + n2), 2);
 					double R;
@@ -784,7 +795,7 @@ public:
 int main() {
 	int W = 512;
 	int H = 512;
-	int N_rays = 500;
+	int N_rays = 5000;
 
 	double fov = 60 * M_PI / 180;
 	Vector C(0, 0, 55);
@@ -792,34 +803,35 @@ int main() {
 	double distance_mise_au_point = 55;
 
 	Vector L(-10, 20, 40);
-	double l = 4e7;
+	double l = 8e7;
 	Scene mainscene;
 
 	//Sphere(const Vector& O, double R, const Vector& albedo, bool diffuse, bool transp, Vector Emi)
 
 	//Lightsource
-	Sphere Light = Sphere(L, 2, Vector(1., 1., 1.), false, false, (l / (M_PI * 2 * 2)) * Vector(1, 1, 1));
+	double Light_R = 5;
+	Sphere Light = Sphere(L, Light_R, Vector(1., 1., 1.), true, false, (l / (M_PI * Light_R * Light_R)) * Vector(1, 1, 1));
 	mainscene.set_light(&Light);
 
 	
 
 	//Spheres
-	Sphere Sp1 = Sphere(Vector(10., 0., 10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
-	Sphere Sp2 = Sphere(Vector(-10., 0., -10.), 10, Vector(1., 1., 1.), true, false, Vector(0, 0, 0));
+	Sphere Sp1 = Sphere(Vector(10., 0., 0.), 10, Vector(1., 1., 1.), false, false, Vector(0, 0, 0));
+	Sphere Sp2 = Sphere(Vector(-10., 0., 0.), 10, Vector(1., 1., 1.), false, false, Vector(0, 0, 0));
 	Sphere Sp3 = Sphere(Vector(0., 30., 0.), 12, Vector(1., 1., 1.), false, false, Vector(0, 0, 0));
 	Sphere Sp4 = Sphere(Vector(20, 20., 10.), 5, Vector(1., 1., 1.), false, true, Vector(0, 0, 0));
-	//mainscene.add_objet(&Sp1);
-	//mainscene.add_objet(&Sp2);
+	mainscene.add_objet(&Sp1);
+	mainscene.add_objet(&Sp2);
 	//mainscene.add_objet(&Sp3);
 	//mainscene.add_objet(&Sp4);
 
 	
 
 	//Walls
-	Sphere W1 = Sphere(Vector(0., 0, -1000), 940, Vector(1., 0., 0.), true, false, Vector(0, 0, 0));
-	Sphere W2 = Sphere(Vector(0., 1000, 0), 940, Vector(0., 0., 1.), true, false, Vector(0, 0, 0));
-	Sphere W3 = Sphere(Vector(0., -1020, 0), 990, Vector(0., 1., 0.), true, false, Vector(0, 0, 0));
-	Sphere W4 = Sphere(Vector(0., 0., 1000), 940, Vector(1., 1., 0.), true, false, Vector(0, 0, 0));
+	Sphere W1 = Sphere(Vector(0., 0, -990), 940, Vector(1., 0., 0.), true, false, Vector(0, 0, 0));
+	Sphere W2 = Sphere(Vector(0., 990, 0), 940, Vector(0., 0., 1.), true, false, Vector(0, 0, 0));
+	Sphere W3 = Sphere(Vector(0., -1010, 0), 990, Vector(0., 1., 0.), true, false, Vector(0, 0, 0));
+	Sphere W4 = Sphere(Vector(0., 0., 990), 940, Vector(1., 1., 0.), true, false, Vector(0, 0, 0));
 	Sphere W5 = Sphere(Vector(990, 0., 0), 940, Vector(1., 0., 1.), true, false, Vector(0, 0, 0));
 	Sphere W6 = Sphere(Vector(-990, 0., 0), 940, Vector(0., 1., 1.), true, false, Vector(0, 0, 0));
 	mainscene.add_objet(&W1);
@@ -829,8 +841,14 @@ int main() {
 	mainscene.add_objet(&W5);
 	mainscene.add_objet(&W6);
 
-	Mesh Girl = Mesh("girl.obj", 25, Vector(0, -15, 10), true, false, Vector(1, 1, 1), Vector(0, 0, 0));
-	mainscene.add_objet(&Girl);
+	Mesh Girl = Mesh("girl.obj", 25, Vector(0, -20, 10), true, false, Vector(1, 1, 1), Vector(0, 0, 0));
+	Girl.add_texture("12c14c70.bmp");
+	Girl.add_texture("13932ef0.bmp");
+	Girl.add_texture("19d89130.bmp");
+	Girl.add_texture("16cecd10.bmp");
+	Girl.add_texture("16c2e0d0.bmp");
+	Girl.add_texture("12dbd6d0.bmp");
+	//mainscene.add_objet(&Girl);
 
 	std::vector<unsigned char> image(W*H * 3, 0);
 
@@ -860,7 +878,7 @@ int main() {
 				uprime.normalize();
 
 				Ray rini(Cprime, uprime);
-				I = I + mainscene.getColor(rini, 1);
+				I = I + mainscene.getColor(rini, 5);
 			}
 			I = I / N_rays;
 			image[(i * W + j) * 3 + 0] = std::min(255, std::max(0, int(pow(I[0], 0.45))));
